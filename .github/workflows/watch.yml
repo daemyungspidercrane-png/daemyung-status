@@ -1,0 +1,40 @@
+# 대명 웍스 운영 사이트 감시 — 10분마다 응답을 보고, 안 되면 이 작업이 실패해 GitHub 가 계정 메일로 알림.
+# 코드·데이터는 없음(공개 주소만). 60일 동안 이 저장소에 변화가 없으면 GitHub 가 정기 실행을 멈추니, 아래 keepalive 가 한 달에 한 번 기록을 남김.
+name: watch
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 사이트 응답 확인(로그인 화면·상태 확인 주소)
+        run: |
+          fail=0
+          for url in https://daemyung-care-production.up.railway.app/login https://daemyung-care-production.up.railway.app/api/health; do
+            ok=0
+            for i in 1 2 3; do
+              code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$url" || echo 000)
+              echo "$url → $code (시도 $i)"
+              case "$code" in 200|307) ok=1; break;; esac
+              sleep 20
+            done
+            [ $ok = 1 ] || fail=1
+          done
+          if [ $fail = 1 ]; then echo "::error::대명 웍스 운영 사이트가 응답하지 않음"; exit 1; fi
+  keepalive:
+    if: github.event.schedule == '*/10 * * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 한 달에 한 번 기록(정기 실행 멈춤 방지)
+        run: |
+          if [ "$(date -u +%d%H%M | cut -c1-5)" = "01000" ]; then
+            date -u > .keepalive
+            git config user.name "status-bot"; git config user.email "status-bot@users.noreply.github.com"
+            git add .keepalive && git commit -m "keepalive" && git push
+          fi
